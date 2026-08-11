@@ -185,7 +185,8 @@ function renderTimeline() {
   el.timeline.innerHTML = '';
   for (const ev of events) {
     const isNav = ev.type === 'navigation' || ev.type === 'pageLoad';
-    if (ev.type === 'request' && !showRequests) continue;
+    const isStream = ev.type === 'websocket' || ev.type === 'sse';
+    if ((ev.type === 'request' || isStream) && !showRequests) continue;
     if (isNav && !showNav) continue;
     if (ev.type === 'screenshot' && !showShots) continue;
     if (ev.type === 'interaction' && !showClicks) continue;
@@ -211,6 +212,11 @@ function renderTimeline() {
       const what = ev.target?.text || ev.target?.label || ev.target?.selector || '';
       label = `● ${ev.kind}${ev.key ? ` ${ev.key}` : ''} ${what}`;
       li.classList.add('interaction');
+    } else if (isStream) {
+      const proto = ev.type === 'sse' ? 'SSE' : 'WS';
+      const counts = ev.event === 'closed' ? ` (${ev.framesSent ?? 0}↑ ${ev.framesReceived ?? 0}↓)` : '';
+      label = `⇅ ${proto} ${ev.event}${counts} ${shortUrl(ev.url)}`;
+      li.classList.add('stream');
     } else {
       label = ev.event === 'frameNavigated' || ev.event === 'navigatedWithinDocument'
         ? `⭢ ${shortUrl(ev.url)}${ev.isMainFrame === false ? ' (frame)' : ''}`
@@ -246,7 +252,40 @@ async function showDetail(ev) {
   if (ev.type === 'screenshot') return showScreenshotDetail(ev);
   if (ev.type === 'request') return showRequestDetail(ev);
   if (ev.type === 'interaction') return showInteractionDetail(ev);
+  if (ev.type === 'websocket' || ev.type === 'sse') return showStreamDetail(ev);
   el.detail.appendChild(kvTable(Object.entries(ev)));
+}
+
+async function showStreamDetail(ev) {
+  el.detail.appendChild(kvTable([
+    ['time', ev.ts],
+    ['type', ev.type === 'sse' ? 'Server-Sent Events' : 'WebSocket'],
+    ['event', ev.event],
+    ['URL', ev.url],
+    ['frames sent', ev.framesSent],
+    ['frames received', ev.framesReceived],
+  ].filter(([, v]) => v !== undefined && v !== null)));
+
+  if (ev.metaFile) {
+    try {
+      const meta = JSON.parse(await (await readFile(ev.metaFile)).text());
+      el.detail.appendChild(kvTable(
+        Object.entries(meta).filter(([k]) => k !== 'streamFile' && k !== 'url')
+      ));
+    } catch {
+      // meta may not exist yet for a stream that was open at an abort
+    }
+  }
+  if (ev.streamFile) {
+    const h = document.createElement('h3');
+    h.textContent = 'Messages';
+    el.detail.appendChild(h);
+    try {
+      await appendBodyPreview(ev.streamFile);
+    } catch {
+      el.detail.appendChild(hint('No messages recorded on this connection.'));
+    }
+  }
 }
 
 function showInteractionDetail(ev) {
@@ -389,7 +428,7 @@ async function appendBodyPreview(relPath) {
     return;
   }
 
-  const textExts = ['json', 'html', 'css', 'js', 'xml', 'txt', 'md', 'csv'];
+  const textExts = ['json', 'jsonl', 'html', 'css', 'js', 'xml', 'txt', 'md', 'csv'];
   if (textExts.includes(ext)) {
     const file = await readFile(relPath);
     let text = await file.text();

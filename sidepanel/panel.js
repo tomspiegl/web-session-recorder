@@ -40,6 +40,8 @@ let stopReasonOverride = null;
 let queueWarned = false;
 // Last captured main-frame HTML document; linked from screenshot metadata.
 let lastDocument = null;
+// Open WebSocket/SSE streams: key -> { kind, url, files, counters }.
+let liveStreams = new Map();
 // MV3 service workers are killed after ~30s without events; during quiet
 // phases (user typing, no traffic) that would detach the debugger and kill
 // the session. Ping well inside that window while recording.
@@ -352,6 +354,7 @@ async function startRecordingSession(tabId, { resume }) {
   stopReasonOverride = null;
   queueWarned = false;
   lastDocument = null;
+  liveStreams = new Map();
 
   el.sessionFolder.textContent = `📁 ${folderName}`;
   el.sessionFolder.title = folderName;
@@ -406,6 +409,73 @@ function onMessage(msg) {
     case MSG.USER_EVENT:
       onUserEvent(msg);
       break;
+    case MSG.WS_OPEN: {
+      const key = `ws:${msg.wsId}`;
+      const files = writer.openStream(key, 'WS', msg.seq, msg.ts, msg.url);
+      liveStreams.set(key, {
+        kind: 'ws', url: msg.url, openedAt: msg.ts, sent: 0, received: 0, truncated: 0, ...files,
+      });
+      writer.appendEvent({
+        seq: msg.seq, ts: msg.ts, type: 'websocket', event: 'opened',
+        url: msg.url, streamFile: files.streamFile, metaFile: files.metaFile,
+      });
+      logLine(`WS opened: ${msg.url}`, 'event');
+      break;
+    }
+    case MSG.WS_FRAME: {
+      const stream = liveStreams.get(`ws:${msg.wsId}`);
+      if (!stream) break;
+      if (msg.dir === 'sent') stream.sent++;
+      else stream.received++;
+      if (msg.truncated) stream.truncated++;
+      writer.appendStreamLine(`ws:${msg.wsId}`, {
+        ts: msg.ts, dir: msg.dir, opcode: msg.opcode,
+        truncated: msg.truncated || undefined, payload: msg.payload,
+      });
+      break;
+    }
+    case MSG.WS_CLOSE: {
+      const key = `ws:${msg.wsId}`;
+      const stream = liveStreams.get(key);
+      if (!stream) break;
+      liveStreams.delete(key);
+      writer.closeStream(key, {
+        url: stream.url, openedAt: stream.openedAt, closedAt: msg.ts,
+        framesSent: msg.framesSent, framesReceived: msg.framesReceived,
+        droppedFrames: msg.droppedFrames, truncatedFrames: msg.truncatedFrames,
+        streamFile: stream.streamFile,
+      });
+      writer.appendEvent({
+        seq: msg.seq, ts: msg.ts, type: 'websocket', event: 'closed', url: stream.url,
+        framesSent: msg.framesSent, framesReceived: msg.framesReceived,
+        streamFile: stream.streamFile, metaFile: stream.metaFile,
+      });
+      logLine(`WS closed: ${stream.url} (${msg.framesSent}↑ ${msg.framesReceived}↓)`, 'event');
+      break;
+    }
+    case MSG.SSE_MESSAGE: {
+      const key = `sse:${msg.sseId}`;
+      let stream = liveStreams.get(key);
+      if (!stream) {
+        const files = writer.openStream(key, 'SSE', msg.seq, msg.ts, msg.url);
+        stream = {
+          kind: 'sse', url: msg.url, openedAt: msg.ts, messages: 0, truncated: 0, ...files,
+        };
+        liveStreams.set(key, stream);
+        writer.appendEvent({
+          seq: msg.seq, ts: msg.ts, type: 'sse', event: 'opened',
+          url: msg.url, streamFile: files.streamFile, metaFile: files.metaFile,
+        });
+        logLine(`SSE stream: ${msg.url ?? '(unknown URL)'}`, 'event');
+      }
+      stream.messages++;
+      if (msg.truncated) stream.truncated++;
+      writer.appendStreamLine(key, {
+        ts: msg.ts, eventName: msg.eventName, eventId: msg.eventId,
+        truncated: msg.truncated || undefined, data: msg.data,
+      });
+      break;
+    }
     case MSG.PAUSED:
       writer.appendEvent({ seq: msg.seq, ts: msg.ts, type: 'pause' });
       logLine('Recording paused (debugger released)', 'event');
@@ -595,6 +665,16 @@ async function finalizeSession(reason, endedAt, detail = null) {
   cleanupPort();
 
   if (writer && sessionMeta) {
+    // Streams still open at stop get their metadata written too.
+    for (const [key, stream] of liveStreams) {
+      writer.closeStream(key, {
+        url: stream.url, openedAt: stream.openedAt, closedAt: null, openAtStop: true,
+        framesSent: stream.sent, framesReceived: stream.received,
+        messages: stream.messages, truncatedFrames: stream.truncated,
+        streamFile: stream.streamFile,
+      });
+    }
+    liveStreams.clear();
     const bytesWritten = baseBytesWritten + writer.bytesWritten;
     sessionMeta.endedAt = endedAt || new Date().toISOString();
     sessionMeta.stopReason = reason;

@@ -74,6 +74,23 @@ Every line has `seq` (int), `ts` (ISO timestamp), `type`. Types:
 {"seq":30,"ts":"…","type":"pause"}
 {"seq":31,"ts":"…","type":"resume"}
 
+// WebSocket / Server-Sent-Events streams. The lifecycle lives here; the
+// messages themselves live in a sidecar stream file (one JSON line each):
+{"seq":40,"ts":"…","type":"websocket","event":"opened","url":"wss://…",
+ "streamFile":"requests/000040_…_WS_host_path.ws.jsonl",
+ "metaFile":"requests/000040_…_WS_host_path.meta.json"}
+{"seq":95,"ts":"…","type":"websocket","event":"closed","url":"wss://…",
+ "framesSent":12,"framesReceived":87,"streamFile":"…","metaFile":"…"}
+{"seq":52,"ts":"…","type":"sse","event":"opened","url":"https://…",
+ "streamFile":"requests/000052_…_SSE_host_path.sse.jsonl","metaFile":"…"}
+// Stream sidecar line formats:
+//   .ws.jsonl:  {"ts":"…","dir":"sent"|"received","opcode":1,"payload":"…","truncated":true?}
+//   .sse.jsonl: {"ts":"…","eventName":"message","eventId":"42","data":"…","truncated":true?}
+// Caps: payloads over 64 KB are truncated (flagged); after ~20 MB per
+// connection further frames are counted in the meta but not stored.
+// The .meta.json has url, openedAt, closedAt (null + openAtStop:true if the
+// stream was still open when recording stopped), frame/message counts.
+
 // A user interaction (what the user DID — correlate with nearby requests,
 // navigations and screenshots to explain cause and effect):
 {"seq":7,"ts":"…","type":"interaction","kind":"click","x":412,"y":230,
@@ -127,6 +144,7 @@ including scrolling, modals, dynamic content).
   "body": {
     "bodyFile": "requests/….json", "bodySize": 18234, "base64Encoded": false
     // OR: "bodySkipped": "size" | "scheme" | "redirect" | "resourceType:…"
+    //     | "sessionStopped" (request still in flight when recording ended)
     // OR: "bodyError": "evicted" — metadata kept, body unavailable
   }
 }

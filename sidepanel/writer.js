@@ -29,6 +29,7 @@ export class SessionWriter {
     this._pendingLines = [];
     this._flushTimer = null;
     this._eventsOffset = 0;
+    this._streams = new Map(); // key -> per-connection WS/SSE stream state
   }
 
   /** Create (or open) a session folder by name under the root handle. */
@@ -227,6 +228,71 @@ export class SessionWriter {
       .catch(() => {});
   }
 
+  /**
+   * Open a WS/SSE message-stream sidecar in requests/ (one JSON line per
+   * frame/message). Returns the relative file names for events.jsonl.
+   * @param {string} kind 'WS' | 'SSE'
+   */
+  openStream(key, kind, seq, ts, url) {
+    const base = buildRequestBase(seq, ts, kind, url || 'stream');
+    const state = {
+      fileName: `${base}.${kind.toLowerCase()}.jsonl`,
+      metaName: `${base}.meta.json`,
+      pending: [],
+      timer: null,
+      offset: 0,
+      handle: null,
+    };
+    this._streams.set(key, state);
+    return {
+      streamFile: `requests/${state.fileName}`,
+      metaFile: `requests/${state.metaName}`,
+    };
+  }
+
+  /** Append one frame/message line to an open stream (buffered). */
+  appendStreamLine(key, obj) {
+    const state = this._streams.get(key);
+    if (!state) return;
+    state.pending.push(JSON.stringify(obj) + '\n');
+    if (state.pending.length >= JSONL_FLUSH_LINES) {
+      this._flushStream(state);
+    } else if (!state.timer) {
+      state.timer = setTimeout(() => this._flushStream(state), JSONL_FLUSH_MS);
+    }
+  }
+
+  _flushStream(state) {
+    if (state.timer) {
+      clearTimeout(state.timer);
+      state.timer = null;
+    }
+    if (state.pending.length === 0) return;
+    const bytes = new TextEncoder().encode(state.pending.join(''));
+    state.pending = [];
+    this._enqueue(async () => {
+      if (!state.handle) {
+        state.handle = await this.requestsDir.getFileHandle(state.fileName, { create: true });
+      }
+      const writable = await state.handle.createWritable({ keepExistingData: true });
+      await writable.write({ type: 'write', position: state.offset, data: bytes });
+      await writable.close();
+      state.offset += bytes.byteLength;
+      this.bytesWritten += bytes.byteLength;
+    });
+  }
+
+  /** Flush a stream and write its .meta.json; the key becomes invalid. */
+  closeStream(key, meta) {
+    const state = this._streams.get(key);
+    if (!state) return;
+    this._flushStream(state);
+    this._enqueue(() =>
+      this._writeFile(this.requestsDir, state.metaName, JSON.stringify(meta, null, 2))
+    );
+    this._streams.delete(key);
+  }
+
   /** Write an arbitrary extra file into the session folder root. */
   writeExtra(name, data) {
     this._enqueue(() => this._writeFile(this.sessionDir, name, data));
@@ -243,6 +309,7 @@ export class SessionWriter {
   async finalize() {
     this.flushEvents();
     this.flushLog();
+    for (const state of this._streams.values()) this._flushStream(state);
     await this._chain;
   }
 }

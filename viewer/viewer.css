@@ -182,6 +182,10 @@ aside {
   color: light-dark(#b05a00, #f5b04d);
 }
 
+#timeline li.stream {
+  color: light-dark(#7b1fa2, #ce93d8);
+}
+
 #detail {
   flex: 1;
   min-width: 0;

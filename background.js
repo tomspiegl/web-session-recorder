@@ -24,6 +24,10 @@ const SCREENCAST_OPTS = {
 };
 // DOM snapshots beyond this size are dropped (screenshot is still taken).
 const DOM_SNAPSHOT_CAP_CHARS = 10_000_000;
+// WebSocket/SSE streams: per-frame payload cap and total recorded chars per
+// connection (further frames are counted but not stored).
+const FRAME_PAYLOAD_CAP_CHARS = 64 * 1024;
+const STREAM_TOTAL_CAP_CHARS = 20 * 1024 * 1024;
 // Auto shots take a DOM snapshot at most this often (manual shots always do).
 // Typing fires pixel-change shots on every keystroke burst; shipping a full
 // DOM with each was the prime overload suspect.
@@ -237,6 +241,8 @@ async function startSession(port, tabId, autoScreenshot, sensitivity, startSeq =
     lastDomAt: 0,
     reattaching: false,
     paused: false,
+    wsStreams: new Map(), // requestId -> { url, sent, received, bytes, dropped, truncated }
+    sseStreams: new Map(), // requestId -> { url, messages, bytes, dropped }
     keepAliveTimer: setInterval(() => chrome.runtime.getPlatformInfo(() => {}), KEEPALIVE_INTERVAL_MS),
   };
 
@@ -371,6 +377,15 @@ async function resumeSession() {
 
 function endSession(reason, { detach = true, detail = null } = {}) {
   if (!session) return;
+  // Emit metadata for requests still in flight (open SSE streams, long polls)
+  // so they are not lost — bodies are unavailable, headers/timing are not.
+  try {
+    for (const entry of session.pending.values()) {
+      emitRequestComplete(entry, { bodySkipped: 'sessionStopped' });
+    }
+  } catch {
+    // best effort
+  }
   const { port, tabId } = session;
   if (session.autoTimer) clearTimeout(session.autoTimer);
   clearInterval(session.keepAliveTimer);
@@ -422,6 +437,21 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
       break;
     case 'Network.loadingFailed':
       onLoadingFailed(params);
+      break;
+    case 'Network.webSocketCreated':
+      onWebSocketCreated(params);
+      break;
+    case 'Network.webSocketFrameSent':
+      onWebSocketFrame(params, 'sent');
+      break;
+    case 'Network.webSocketFrameReceived':
+      onWebSocketFrame(params, 'received');
+      break;
+    case 'Network.webSocketClosed':
+      onWebSocketClosed(params);
+      break;
+    case 'Network.eventSourceMessageReceived':
+      onSseMessage(params);
       break;
     case 'Page.frameNavigated': {
       const isMainFrame = !params.frame.parentId;
@@ -599,6 +629,104 @@ function emitRequestComplete(entry, { body = null, bodySkipped, bodyError, faile
     bodyError,
     isMainDocument:
       entry.resourceType === 'Document' && entry.frameId === session.mainFrameId,
+  });
+}
+
+function onWebSocketCreated(params) {
+  const info = { url: params.url, sent: 0, received: 0, bytes: 0, dropped: 0, truncated: 0 };
+  session.wsStreams.set(params.requestId, info);
+  session.port.postMessage({
+    type: MSG.WS_OPEN,
+    wsId: params.requestId,
+    seq: ++session.seq,
+    ts: new Date().toISOString(),
+    url: params.url,
+  });
+}
+
+function onWebSocketFrame(params, dir) {
+  const info = session.wsStreams.get(params.requestId);
+  if (!info) return;
+  if (dir === 'sent') info.sent++;
+  else info.received++;
+  if (info.bytes >= STREAM_TOTAL_CAP_CHARS) {
+    info.dropped++;
+    return;
+  }
+  let payload = params.response?.payloadData ?? '';
+  let truncated = false;
+  if (payload.length > FRAME_PAYLOAD_CAP_CHARS) {
+    payload = payload.slice(0, FRAME_PAYLOAD_CAP_CHARS);
+    truncated = true;
+    info.truncated++;
+  }
+  info.bytes += payload.length;
+  session.port.postMessage({
+    type: MSG.WS_FRAME,
+    wsId: params.requestId,
+    ts: new Date().toISOString(),
+    dir,
+    opcode: params.response?.opcode,
+    payload,
+    truncated,
+  });
+}
+
+function onWebSocketClosed(params) {
+  const info = session.wsStreams.get(params.requestId);
+  if (!info) return;
+  session.wsStreams.delete(params.requestId);
+  session.port.postMessage({
+    type: MSG.WS_CLOSE,
+    wsId: params.requestId,
+    seq: ++session.seq,
+    ts: new Date().toISOString(),
+    url: info.url,
+    framesSent: info.sent,
+    framesReceived: info.received,
+    droppedFrames: info.dropped,
+    truncatedFrames: info.truncated,
+  });
+}
+
+function onSseMessage(params) {
+  let info = session.sseStreams.get(params.requestId);
+  let first = false;
+  if (!info) {
+    first = true;
+    const pendingEntry = session.pending.get(params.requestId);
+    info = {
+      seq: ++session.seq,
+      url: pendingEntry?.request.url ?? null,
+      messages: 0,
+      bytes: 0,
+      dropped: 0,
+    };
+    session.sseStreams.set(params.requestId, info);
+  }
+  info.messages++;
+  if (info.bytes >= STREAM_TOTAL_CAP_CHARS) {
+    info.dropped++;
+    return;
+  }
+  let data = params.data ?? '';
+  let truncated = false;
+  if (data.length > FRAME_PAYLOAD_CAP_CHARS) {
+    data = data.slice(0, FRAME_PAYLOAD_CAP_CHARS);
+    truncated = true;
+  }
+  info.bytes += data.length;
+  session.port.postMessage({
+    type: MSG.SSE_MESSAGE,
+    sseId: params.requestId,
+    first,
+    seq: first ? info.seq : undefined,
+    url: info.url,
+    ts: new Date().toISOString(),
+    eventName: params.eventName,
+    eventId: params.eventId,
+    data,
+    truncated,
   });
 }
 

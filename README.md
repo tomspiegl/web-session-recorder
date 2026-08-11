@@ -206,9 +206,14 @@ One folder per session inside the folder you picked:
 - **Body size cap: 20 MB** per response (`BODY_CAP_BYTES` in `background.js`).
   Larger bodies are skipped; metadata is still recorded with `bodySkipped: "size"`.
 - Bodies are also skipped for `data:`/`blob:`/`about:` URLs, redirect hops
-  (redirects have no body), and streaming resource types
-  (`EventSource`, `WebSocket`, `Media`).
-- **WebSocket frames are not captured** in v1 (connection metadata is recorded).
+  (redirects have no body), and `Media` streams.
+- **WebSocket frames and SSE messages ARE captured**: each connection gets a
+  sidecar stream file in `requests/` (`….ws.jsonl` / `….sse.jsonl`, one JSON
+  line per frame/message with direction and payload) plus a `.meta.json` with
+  counts; open/close lifecycle appears in `events.jsonl`. Payloads over 64 KB
+  are truncated (flagged), and after ~20 MB per connection further frames are
+  counted but not stored. Streams still open at Stop are finalized with
+  `openAtStop: true`.
 - Response bodies evicted by Chrome before they could be fetched (rare; mostly
   on very fast navigations) are recorded as `bodyError` — metadata is never lost.
 - Closing the side panel aborts the session (the panel performs the disk

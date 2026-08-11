@@ -24,6 +24,10 @@ export const MSG = {
   NAV_EVENT: 'nav-event', // { seq, ts, event, url?, frameId?, isMainFrame? }
   SCREENSHOT_DATA: 'screenshot-data', // { seq, ts, base64, dom, trigger, pageUrl, pageTitle }
   USER_EVENT: 'user-event', // { seq, ts, kind, x, y, target, form?, value?, checked? }
+  WS_OPEN: 'ws-open', // { wsId, seq, ts, url }
+  WS_FRAME: 'ws-frame', // { wsId, ts, dir: 'sent'|'received', opcode, payload, truncated }
+  WS_CLOSE: 'ws-close', // { wsId, seq, ts, url, framesSent, framesReceived, droppedFrames }
+  SSE_MESSAGE: 'sse-message', // { sseId, ts, eventName, eventId, data, truncated, first?, seq?, url? }
   PAUSED: 'paused', // { seq, ts }
   RESUMED: 'resumed', // { seq, ts }
   STOPPED: 'stopped', // { reason, detail, endedAt }
