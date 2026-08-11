@@ -3,27 +3,35 @@
 A Chrome extension (Manifest V3, vanilla JS, no build step) that records a web
 session for later inspection: as you click through a web application, **all
 network traffic — including full response bodies** (JSON, XML, HTML, CSS,
-JavaScript, images, …) — plus navigation events and on-demand screenshots are
-written live into a folder you pick on disk. Every artifact is prefixed with a
-global sequence number and timestamp, so sorting files alphabetically equals
-chronological capture order.
+JavaScript, images, …), automatic and on-demand **screenshots with
+rendered-DOM snapshots**, **navigation events** and **user interactions**
+(which element was clicked) are written live into a folder you pick on disk.
+Every artifact is prefixed with a global sequence number and timestamp, so
+sorting files alphabetically equals chronological capture order — and every
+session folder is self-describing ([SESSION_FORMAT.md](SESSION_FORMAT.md)),
+ready to hand to an AI assistant for analysis.
 
 ## Install
 
-1. Open `chrome://extensions`.
-2. Enable **Developer mode** (top right).
-3. Click **Load unpacked** and select this directory.
+Chrome cannot install extensions directly from a GitHub URL — get the code
+locally, then load it unpacked:
+
+1. `git clone https://github.com/tomspiegl/web-session-recorder.git`
+   — or **Code → Download ZIP** on GitHub and unzip.
+2. Open `chrome://extensions` and enable **Developer mode** (top right).
+3. Click **Load unpacked** and select the project directory.
 4. Click the extension's toolbar icon to open the **Session Recorder** side panel.
 
+To update: `git pull` (or re-download), then press ↻ on the extension's card.
 Requires Chrome 116+.
 
 ## Usage
 
 1. Open the web application you want to record in a normal `http(s)` tab.
 2. In the side panel, pick that tab from the dropdown. Optionally give the
-   session a **name** (becomes part of the folder name and `session.json`)
-   and a **note** (purpose, ticket, context — stored in `session.json` for
-   whoever analyzes the recording).
+   session a **name** (becomes part of the folder name and `session.json`;
+   defaults to the site's domain) and a **note** (purpose, ticket, context —
+   stored in `session.json` for whoever analyzes the recording).
 3. Click **Start new** and choose (or create) a target folder — a fresh
    session folder is created inside it (grant the "save changes" permission
    when Chrome asks). Or click **Resume existing…** and pick a previous
@@ -45,7 +53,8 @@ Requires Chrome 116+.
    in-page tab switches and dynamically loaded content alike, while noise like
    a blinking caret stays below threshold. The **Auto-screenshot** sensitivity
    selector controls how much of the screen must change — *Fluent* (~2%),
-   *Balanced* (~5%), or *Relaxed* (~12%) — changeable mid-recording. Every
+   *Balanced* (~5%), *Relaxed* (~12%), or **Off** (manual screenshots only) —
+   changeable mid-recording. Every
    captured shot appears as a flashing thumbnail in the panel. The big
    **📷 Take screenshot** button adds extra shots on demand at any time — or
    press **Alt+Shift+S** while working in the page (configurable at
@@ -67,14 +76,17 @@ extension's `viewer/viewer.html` page). Pick a session folder — or a folder
 containing several sessions, then choose one from the dropdown. You get:
 
 - a filterable **timeline** of every recorded event (requests, navigations,
-  screenshots) in capture order,
-- a **detail pane**: click any request to see its metadata and body
-  (pretty-printed JSON, text, images; binaries downloadable), click any
-  screenshot to see it full-size with its page URL and a link to the captured
-  HTML document,
+  screenshots, user interactions) in capture order, with a text filter that
+  searches URLs and clicked-element text/selectors,
+- a **detail pane**: click any request to see its metadata, submitted payload
+  and body (pretty-printed JSON, text, images; binaries downloadable), click
+  any screenshot to see it full-size with its page URL, its rendered-DOM
+  snapshot and a link to the delivered HTML document, click any interaction
+  to see exactly which element was used,
 - **replay controls**: ▶ plays the session's screenshots back using the real
   time gaps between them (scaled by the speed selector, long gaps capped),
-  with prev/next stepping.
+  with prev/next stepping; **paused periods are skipped by default**
+  (uncheck "skip pauses" to keep them).
 
 This is a *timeline replay* of what was recorded. It does not re-execute the
 application against the recorded responses — a live re-run depends on auth,
@@ -90,16 +102,22 @@ inside every new session folder.
 One folder per session inside the folder you picked:
 
 ```
-2026-08-11T14-32-05_session/
-├── session.json      session metadata: startedAt/endedAt, start URL, tab title,
-│                     user agent, Chrome version, viewport, stopReason, totals
-├── events.jsonl      machine-readable index: one JSON line per event
-│                     (request | navigation | pageLoad | screenshot), in order
+2026-08-11T14-32-05_myapp.example.com/        ← <timestamp>_<name|domain>
+├── session.json          formatVersion, name, note, startedAt/endedAt,
+│                         resumedAt[], start URL, tab title, user agent,
+│                         Chrome version, viewport, sensitivity,
+│                         stopReason/stopDetail, totals
+├── events.jsonl          machine-readable index: one JSON line per event
+│                         (request | navigation | pageLoad | screenshot |
+│                          interaction | pause | resume), in order
+├── session.log           timestamped diagnostics and errors
+├── SESSION_FORMAT.md     copy of the format spec (self-describing folder)
 ├── requests/
 │   ├── 000001_2026-08-11T14-32-07.123Z_GET_example.com_index.html       ← response body
 │   └── 000001_2026-08-11T14-32-07.123Z_GET_example.com_index.meta.json ← metadata sidecar
 └── screenshots/
     ├── 000047_2026-08-11T14-33-10.502Z_screenshot-manual.png
+    ├── 000047_2026-08-11T14-33-10.502Z_screenshot-manual.dom.html      ← rendered DOM
     └── 000047_2026-08-11T14-33-10.502Z_screenshot-manual.meta.json
 ```
 
@@ -142,8 +160,9 @@ One folder per session inside the folder you picked:
 - If a session dies without the user stopping it (service worker killed, tab
   renderer crash, unexpected debugger detach), the interrupted session is
   finalized on disk and the panel shows a red alert banner plus a `!` badge
-  on the toolbar icon. Recording is **not** restarted automatically — press
-  Start to record again (a new sibling session folder is created).
+  on the toolbar icon. Recording is **not** restarted automatically — use
+  **Start new** or **Resume existing…** (to append to the interrupted
+  session's folder) when you're ready.
 - **Automatic re-attach:** when the debugger detaches with `target_closed`
   while the tab still exists — prerender/back-forward-cache activation,
   process swap, or a foreign extension injecting a frame Chrome won't let us
@@ -210,7 +229,7 @@ record applications you are authorized to test.
   assigns global sequence numbers, streams assembled records to the panel.
   Never touches the filesystem.
 - `sidepanel/panel.{html,css,js}` — UI and session state machine
-  (`idle → picking-folder → starting → recording → stopping`).
+  (`idle → picking-folder → starting → recording ⇄ paused → stopping`).
 - `sidepanel/writer.js` — `SessionWriter`; owns the `FileSystemDirectoryHandle`
   (only an extension page with a user gesture may call `showDirectoryPicker`)
   and performs all writes through a serialized queue; `events.jsonl` appends
