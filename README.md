@@ -1,4 +1,15 @@
-# Session Recorder
+<p align="center">
+  <img src="icons/logo.png" width="112" alt="Web Session Recorder logo" />
+</p>
+
+<h1 align="center">Web Session Recorder</h1>
+
+<p align="center">
+  <em>Record a web session — every request, screenshot, DOM snapshot and click —<br />
+  into a local, AI-analyzable folder.</em>
+</p>
+
+---
 
 A Chrome extension (Manifest V3, vanilla JS, no build step) that records a web
 session for later inspection: as you click through a web application, **all
