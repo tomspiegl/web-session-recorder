@@ -11,6 +11,16 @@
 
 ---
 
+<p align="center">
+  <img src="docs/screenshots/viewer.png" alt="Session viewer: filterable timeline, screenshot with DOM/HTML links, replay controls" width="840" />
+</p>
+<p align="center"><sub>The session viewer — filterable timeline, detail pane and screenshot replay.</sub></p>
+
+<p align="center">
+  <img src="docs/screenshots/panel-recording.png" alt="Side panel during a recording: pause/stop, screenshot button, live thumbnail and capture log" width="340" />
+</p>
+<p align="center"><sub>The side panel during a recording.</sub></p>
+
 A Chrome extension (Manifest V3, vanilla JS, no build step) that records a web
 session for later inspection: as you click through a web application, **all
 network traffic — including full response bodies** (JSON, XML, HTML, CSS,
