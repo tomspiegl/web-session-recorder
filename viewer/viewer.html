@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Session Recorder — Viewer</title>
+  <link rel="stylesheet" href="viewer.css" />
+</head>
+<body>
+  <header>
+    <h1>Session Viewer</h1>
+    <button id="open-folder" class="primary">Open session folder…</button>
+    <select id="session-select" hidden></select>
+    <div id="session-summary" class="summary"></div>
+  </header>
+
+  <div id="replay-bar" hidden>
+    <button id="replay-prev" title="Previous screenshot">&#x23ee;</button>
+    <button id="replay-play" title="Play / pause">&#x25b6;</button>
+    <button id="replay-next" title="Next screenshot">&#x23ed;</button>
+    <select id="replay-speed">
+      <option value="1">1&times;</option>
+      <option value="2" selected>2&times;</option>
+      <option value="5">5&times;</option>
+      <option value="10">10&times;</option>
+    </select>
+    <label class="skip-pauses" title="Jump over paused periods instead of replaying their real duration">
+      <input type="checkbox" id="replay-skip-pauses" checked /> skip pauses
+    </label>
+    <span id="replay-pos"></span>
+    <span id="replay-url" class="replay-url"></span>
+  </div>
+
+  <main id="main" hidden>
+    <aside>
+      <div class="filters">
+        <label><input type="checkbox" id="f-requests" checked /> requests</label>
+        <label><input type="checkbox" id="f-nav" checked /> navigation</label>
+        <label><input type="checkbox" id="f-shots" checked /> screenshots</label>
+        <label><input type="checkbox" id="f-clicks" checked /> interactions</label>
+        <input type="search" id="f-text" placeholder="filter URL…" />
+      </div>
+      <ul id="timeline"></ul>
+    </aside>
+    <section id="detail">
+      <p class="hint">Select an event from the timeline, or press play to replay the session's screenshots.</p>
+    </section>
+  </main>
+
+  <p id="empty-hint" class="hint">
+    Open a session folder (a <code>…_session</code> directory, or a folder containing several)
+    to inspect and replay a recording.
+  </p>
+
+  <script type="module" src="viewer.js"></script>
+</body>
+</html>

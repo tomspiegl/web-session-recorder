@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Session Recorder</title>
+  <link rel="stylesheet" href="panel.css" />
+</head>
+<body>
+  <header>
+    <h1>Session Recorder</h1>
+    <button id="open-viewer" class="link-btn" title="Open session viewer">Viewer &#x2197;</button>
+    <span id="status" class="badge idle">Idle</span>
+  </header>
+
+  <div class="tab-row">
+    <select id="tab-select"></select>
+    <button id="refresh-tabs" title="Refresh tab list">&#x21bb;</button>
+  </div>
+
+  <input type="text" id="session-name" placeholder="Session name" maxlength="60" />
+
+  <details id="meta-details">
+    <summary>Note (optional)</summary>
+    <textarea id="session-note" rows="2" placeholder="Purpose, ticket, context&hellip;" maxlength="2000"></textarea>
+  </details>
+
+  <div class="action-row">
+    <button id="start" class="primary">&#x25cf; Start new</button>
+    <button id="resume-existing" title="Pick an existing session folder and record into it, appending">&#x23ef; Resume existing&hellip;</button>
+    <button id="pause" hidden>&#x23f8; Pause</button>
+    <button id="stop" class="danger" hidden>&#x25a0; Stop</button>
+  </div>
+
+  <button id="screenshot" class="shot-btn" disabled
+    title="Take an extra screenshot now (Alt+Shift+S)">
+    &#x1F4F7; Screenshot <span class="shortcut">Alt+Shift+S</span>
+  </button>
+
+  <div class="sensitivity-row" title="Automatic screenshots on view changes">
+    <label for="sensitivity">Auto</label>
+    <select id="sensitivity">
+      <option value="fluent">Fluent &mdash; reacts to small changes</option>
+      <option value="balanced">Balanced</option>
+      <option value="relaxed">Relaxed &mdash; big changes only</option>
+      <option value="off">Off &mdash; manual screenshots only</option>
+    </select>
+  </div>
+
+  <div id="session-folder" class="folder-line" hidden></div>
+
+  <details id="preview-details" open hidden>
+    <summary>Last screenshot</summary>
+    <section id="shot-preview">
+      <img id="shot-img" alt="Last screenshot" />
+      <div id="shot-caption"></div>
+    </section>
+  </details>
+
+  <div class="statusline">
+    <span id="count-requests">0</span> req &middot;
+    <span id="count-screenshots">0</span> shots &middot;
+    <span id="count-bytes">0 B</span>
+  </div>
+
+  <div id="error-banner" hidden></div>
+
+  <details class="log-section" open>
+    <summary>Capture log</summary>
+    <ul id="log"></ul>
+  </details>
+
+  <script type="module" src="panel.js"></script>
+</body>
+</html>
