@@ -18,7 +18,7 @@
 </p>
 <p align="center"><sub>The side panel during a recording.</sub></p>
 
-### Viewer
+### Session Viewer / Replay
 
 <p align="center">
   <img src="docs/screenshots/viewer.png" alt="Session viewer: filterable timeline, screenshot with DOM/HTML links, replay controls" width="840" />
