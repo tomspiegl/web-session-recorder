@@ -145,6 +145,10 @@ including scrolling, modals, dynamic content).
     "bodyFile": "requests/….json", "bodySize": 18234, "base64Encoded": false
     // OR: "bodySkipped": "size" | "scheme" | "redirect" | "resourceType:…"
     //     | "sessionStopped" (request still in flight when recording ended)
+    //     | "thirdPartyAsset" (JS/CSS/image/font from a foreign domain —
+    //       ad/tracker noise deliberately not stored; see session.json's
+    //       thirdPartyAssets setting. The app's own assets and all XHR/Fetch
+    //       data traffic are always recorded in full.)
     // OR: "bodyError": "evicted" — metadata kept, body unavailable
   }
 }

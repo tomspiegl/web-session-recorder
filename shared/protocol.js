@@ -16,6 +16,7 @@ export const MSG = {
   RESUME: 'resume', // {} — re-attach and continue capturing
   SCREENSHOT: 'screenshot', // {}
   SET_AUTO_SCREENSHOT: 'set-auto-screenshot', // { enabled, sensitivity }
+  SET_CAPTURE: 'set-capture', // { thirdPartyAssets: 'skip' | 'record' }
   PING: 'ping', // {} — keepalive; receiving it resets the service worker idle timer
 
   // service worker -> panel

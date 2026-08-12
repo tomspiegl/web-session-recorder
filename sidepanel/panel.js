@@ -24,6 +24,7 @@ const el = {
   errorBanner: document.getElementById('error-banner'),
   log: document.getElementById('log'),
   sensitivity: document.getElementById('sensitivity'),
+  assets: document.getElementById('assets'),
   shotPreview: document.getElementById('shot-preview'),
   shotImg: document.getElementById('shot-img'),
   shotCaption: document.getElementById('shot-caption'),
@@ -65,6 +66,14 @@ let resuming = false;
 setState('idle');
 refreshTabs();
 el.sensitivity.value = localStorage.getItem('sensitivity') || 'fluent';
+el.assets.value = localStorage.getItem('thirdPartyAssets') || 'skip';
+el.assets.addEventListener('change', () => {
+  localStorage.setItem('thirdPartyAssets', el.assets.value);
+  if (state === 'recording' || state === 'paused') {
+    port.postMessage({ type: MSG.SET_CAPTURE, thirdPartyAssets: el.assets.value });
+    logLine(`3rd-party assets: ${el.assets.value === 'skip' ? 'metadata only' : 'record bodies'}`, 'event');
+  }
+});
 el.refreshTabs.addEventListener('click', refreshTabs);
 el.tabSelect.addEventListener('change', updateNamePlaceholder);
 el.start.addEventListener('click', onStart);
@@ -368,6 +377,7 @@ async function startRecordingSession(tabId, { resume }) {
     tabId,
     autoScreenshot: el.sensitivity.value !== 'off',
     sensitivity: el.sensitivity.value,
+    thirdPartyAssets: el.assets.value,
     startSeq: resume ? resumeData.lastSeq : 0,
   });
 }
@@ -539,6 +549,7 @@ function onStarted(msg) {
       bodyCapBytes: msg.bodyCapBytes,
       autoScreenshot: el.sensitivity.value !== 'off',
       sensitivity: el.sensitivity.value,
+      thirdPartyAssets: el.assets.value,
       totals: null,
     };
   }

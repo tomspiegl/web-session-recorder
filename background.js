@@ -8,6 +8,9 @@ import { MSG, PORT_NAME, STOP_REASONS, SENSITIVITY } from './shared/protocol.js'
 const BODY_CAP_BYTES = 20 * 1024 * 1024;
 const SKIP_SCHEMES = ['data:', 'blob:', 'chrome-extension:', 'about:'];
 const SKIP_RESOURCE_TYPES = new Set(['EventSource', 'WebSocket', 'Media']);
+// Asset types whose bodies are skippable for third-party hosts (ad/tracker
+// noise). Data traffic (XHR/Fetch/Document) is always recorded in full.
+const ASSET_RESOURCE_TYPES = new Set(['Script', 'Stylesheet', 'Image', 'Font']);
 
 // Visual change detection: CDP screencast pushes a small preview frame ONLY
 // when the tab's pixels actually change (compositor-driven — no polling).
@@ -164,7 +167,8 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener((msg) => {
     switch (msg.type) {
       case MSG.START:
-        startSession(port, msg.tabId, !!msg.autoScreenshot, msg.sensitivity, msg.startSeq || 0);
+        startSession(port, msg.tabId, !!msg.autoScreenshot, msg.sensitivity, msg.startSeq || 0,
+          msg.thirdPartyAssets !== 'record');
         break;
       case MSG.STOP:
         if (session && session.port === port) endSession(STOP_REASONS.USER);
@@ -184,6 +188,11 @@ chrome.runtime.onConnect.addListener((port) => {
         // keeps the worker alive through quiet phases (user typing, no
         // traffic) — the suspected cause of sessions dying mid-recording.
         chrome.runtime.getPlatformInfo(() => {});
+        break;
+      case MSG.SET_CAPTURE:
+        if (session && session.port === port) {
+          session.skipThirdPartyAssets = msg.thirdPartyAssets !== 'record';
+        }
         break;
       case MSG.SET_AUTO_SCREENSHOT:
         if (session && session.port === port) {
@@ -211,7 +220,7 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 });
 
-async function startSession(port, tabId, autoScreenshot, sensitivity, startSeq = 0) {
+async function startSession(port, tabId, autoScreenshot, sensitivity, startSeq = 0, skipThirdPartyAssets = true) {
   if (session) {
     postError(port, 'Already recording another session.');
     return;
@@ -243,6 +252,8 @@ async function startSession(port, tabId, autoScreenshot, sensitivity, startSeq =
     paused: false,
     wsStreams: new Map(), // requestId -> { url, sent, received, bytes, dropped, truncated }
     sseStreams: new Map(), // requestId -> { url, messages, bytes, dropped }
+    skipThirdPartyAssets,
+    siteHost: null, // host of the recorded site; third-party = not same site
     keepAliveTimer: setInterval(() => chrome.runtime.getPlatformInfo(() => {}), KEEPALIVE_INTERVAL_MS),
   };
 
@@ -250,6 +261,11 @@ async function startSession(port, tabId, autoScreenshot, sensitivity, startSeq =
     await enableDomains(target);
     const metrics = await chrome.debugger.sendCommand(target, 'Page.getLayoutMetrics');
     const tab = await chrome.tabs.get(tabId);
+    try {
+      session.siteHost = new URL(tab.url).hostname;
+    } catch {
+      session.siteHost = null;
+    }
     const viewportSrc = metrics.cssLayoutViewport || metrics.layoutViewport || {};
     port.postMessage({
       type: MSG.STARTED,
@@ -455,7 +471,14 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
       break;
     case 'Page.frameNavigated': {
       const isMainFrame = !params.frame.parentId;
-      if (isMainFrame) session.mainFrameId = params.frame.id;
+      if (isMainFrame) {
+        session.mainFrameId = params.frame.id;
+        try {
+          session.siteHost = new URL(params.frame.url).hostname || session.siteHost;
+        } catch {
+          // keep previous site host
+        }
+      }
       emitNavEvent({
         event: 'frameNavigated',
         url: params.frame.url,
@@ -555,6 +578,14 @@ async function onLoadingFinished(params) {
     bodySkipped = `resourceType:${entry.resourceType}`;
   } else if (params.encodedDataLength > BODY_CAP_BYTES) {
     bodySkipped = 'size';
+  } else if (
+    session.skipThirdPartyAssets &&
+    ASSET_RESOURCE_TYPES.has(entry.resourceType) &&
+    !isSameSite(url, session.siteHost)
+  ) {
+    // Ad/tracker asset noise: keep the metadata, skip the body. The app's own
+    // assets and ALL data traffic (XHR/Fetch/Document) are unaffected.
+    bodySkipped = 'thirdPartyAsset';
   } else {
     // Fetch the body immediately: CDP evicts bodies on navigation and when
     // its buffer fills, so this must not be deferred.
@@ -582,6 +613,21 @@ function onLoadingFailed(params) {
   emitRequestComplete(entry, {
     failed: { errorText: params.errorText, canceled: !!params.canceled },
   });
+}
+
+/**
+ * Same-site check by registrable-domain approximation (last two host labels):
+ * app.example.com and cdn.example.com are same-site; ads.tracker.net is not.
+ */
+function isSameSite(urlString, siteHost) {
+  if (!siteHost) return true; // unknown site — don't skip anything
+  try {
+    const host = new URL(urlString).hostname;
+    const base = siteHost.split('.').slice(-2).join('.');
+    return host === siteHost || host === base || host.endsWith('.' + base);
+  } catch {
+    return true;
+  }
 }
 
 function emitRequestComplete(entry, { body = null, bodySkipped, bodyError, failed } = {}) {

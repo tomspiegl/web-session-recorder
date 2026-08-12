@@ -207,6 +207,12 @@ One folder per session inside the folder you picked:
   Larger bodies are skipped; metadata is still recorded with `bodySkipped: "size"`.
 - Bodies are also skipped for `data:`/`blob:`/`about:` URLs, redirect hops
   (redirects have no body), and `Media` streams.
+- **Third-party asset bodies are skipped by default** (`bodySkipped:
+  "thirdPartyAsset"`): JS/CSS/image/font files served from domains other than
+  the recorded site's are typically ad/tracker noise; their metadata is still
+  recorded, and the site's own assets plus ALL data traffic (XHR/Fetch,
+  regardless of domain) are always captured in full. The **Assets** selector
+  in the panel switches to recording everything, also mid-session.
 - **WebSocket frames and SSE messages ARE captured**: each connection gets a
   sidecar stream file in `requests/` (`….ws.jsonl` / `….sse.jsonl`, one JSON
   line per frame/message with direction and payload) plus a `.meta.json` with
