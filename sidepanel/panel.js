@@ -790,9 +790,9 @@ function logLine(text, cls = '') {
   const li = document.createElement('li');
   li.textContent = `${new Date().toLocaleTimeString()} ${text}`;
   if (cls) li.className = cls;
-  el.log.appendChild(li);
-  while (el.log.childElementCount > MAX_LOG_LINES) el.log.firstElementChild.remove();
-  el.log.scrollTop = el.log.scrollHeight;
+  // Newest first: the latest activity is always visible without scrolling.
+  el.log.prepend(li);
+  while (el.log.childElementCount > MAX_LOG_LINES) el.log.lastElementChild.remove();
   // Persist to session.log while a session is active, for later analysis.
   if (writer && (state === 'recording' || state === 'starting' || state === 'paused')) {
     writer.appendLog(cls === 'error' ? 'error' : 'info', text);
